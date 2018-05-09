@@ -2,10 +2,11 @@ package com.rtbhouse.utils.avro;
 
 import com.sun.codemodel.JClass;
 import com.sun.codemodel.JCodeModel;
+
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
-import org.apache.commons.lang3.StringUtils;
 
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -21,13 +22,13 @@ class SchemaAnalyzer {
     }
 
     JClass keyClassFromMapSchema(Schema schema) {
+        if (!schema.getType().equals(Schema.Type.MAP)) {
+            throw new FastAvroSchemaAnalyzeException("Map schema was expected, instead got:"
+                    + schema.getType().getName());
+        }
         String keyClassName = schema.getProp("java-key-class");
         if (keyClassName != null) {
-            try {
-                return codeModel.ref(Class.forName(keyClassName));
-            } catch (ClassNotFoundException e) {
-                throw new FastSerializerGeneratorException("Unknown key class" + keyClassName);
-            }
+            return codeModel.ref(keyClassName);
         } else {
             return codeModel.ref(String.class);
         }
@@ -35,192 +36,131 @@ class SchemaAnalyzer {
 
     JClass elementClassFromMapSchema(Schema schema) {
         if (!schema.getType().equals(Schema.Type.MAP)) {
-            throw new FastDeserializerGeneratorException("Map schema was expected, instead got:"
+            throw new FastAvroSchemaAnalyzeException("Map schema was expected, instead got:"
                     + schema.getType().getName());
         }
 
-        Schema.Type elementType = schema.getValueType().getType();
-
-        if (Schema.Type.RECORD.equals(elementType)) {
-            return useGenericTypes ? codeModel.ref(GenericData.Record.class)
-                    : codeModel.ref(schema.getValueType()
-                            .getFullName());
-        } else if (Schema.Type.ARRAY.equals(elementType)) {
-            return codeModel.ref(List.class).narrow(elementClassFromArraySchema(schema.getValueType()));
-        } else if (Schema.Type.MAP.equals(elementType)) {
-            return codeModel.ref(Map.class).narrow(String.class)
-                    .narrow(elementClassFromArraySchema(schema.getValueType()));
-        } else if (Schema.Type.ENUM.equals(elementType)) {
-            return useGenericTypes ? codeModel.ref(GenericData.EnumSymbol.class)
-                    : codeModel.ref(schema.getValueType()
-                            .getFullName());
-        } else if (Schema.Type.FIXED.equals(elementType)) {
-            return useGenericTypes ? codeModel.ref(GenericData.Fixed.class)
-                    : codeModel.ref(schema.getValueType()
-                            .getFullName());
-        } else if (Schema.Type.UNION.equals(elementType)) {
-            return classFromUnionSchema(schema.getValueType());
-        }
-
-        try {
-            String primitiveClassName;
-            switch (schema.getValueType().getName()) {
-            case "int":
-                primitiveClassName = "java.lang.Integer";
-                break;
-            case "bytes":
-                primitiveClassName = "java.nio.ByteBuffer";
-                break;
-            case "string":
-                if (schema.getValueType().getProp("java-class") != null) {
-                    primitiveClassName = schema.getValueType().getProp("java-class");
-                } else {
-                    primitiveClassName = "java.lang.String";
-                }
-                break;
-            default:
-                primitiveClassName = "java.lang." + StringUtils.capitalize(StringUtils.lowerCase(schema
-                        .getValueType().getName()));
-            }
-            return codeModel.ref(Class.forName(primitiveClassName));
-        } catch (ReflectiveOperationException e) {
-            throw new FastDeserializerGeneratorException("Unknown type: " + schema
-                    .getValueType().getName(), e);
-        }
+        return classFromSchema(schema.getValueType());
     }
 
     JClass elementClassFromArraySchema(Schema schema) {
         if (!Schema.Type.ARRAY.equals(schema.getType())) {
-            throw new FastDeserializerGeneratorException("Array schema was expected, instead got:"
+            throw new FastAvroSchemaAnalyzeException("Array schema was expected, instead got:"
                     + schema.getType().getName());
         }
 
-        Schema.Type elementType = schema.getElementType().getType();
-
-        if (Schema.Type.RECORD.equals(elementType)) {
-            return useGenericTypes ? codeModel.ref(GenericData.Record.class)
-                    : codeModel.ref(schema.getElementType()
-                            .getFullName());
-        } else if (Schema.Type.ARRAY.equals(elementType)) {
-            return codeModel.ref(List.class).narrow(
-                    elementClassFromArraySchema(schema.getElementType()));
-        } else if (Schema.Type.MAP.equals(elementType)) {
-            return codeModel.ref(Map.class).narrow(keyClassFromMapSchema(schema))
-                    .narrow(elementClassFromMapSchema(schema.getElementType()));
-        } else if (Schema.Type.ENUM.equals(elementType)) {
-            return useGenericTypes ? codeModel.ref(GenericData.EnumSymbol.class)
-                    : codeModel.ref(schema
-                            .getElementType().getFullName());
-        } else if (Schema.Type.FIXED.equals(elementType)) {
-            return useGenericTypes ? codeModel.ref(GenericData.Fixed.class)
-                    : codeModel.ref(schema
-                            .getElementType().getFullName());
-        } else if (Schema.Type.UNION.equals(elementType)) {
-            return classFromUnionSchema(schema.getElementType());
-        }
-
-        try {
-            String primitiveClassName;
-            switch (schema.getElementType().getName()) {
-            case "int":
-                primitiveClassName = "java.lang.Integer";
-                break;
-            case "bytes":
-                primitiveClassName = "java.nio.ByteBuffer";
-                break;
-            case "string":
-                if (schema.getElementType().getProp("java-class") != null) {
-                    primitiveClassName = schema.getElementType().getProp("java-class");
-                } else {
-                    primitiveClassName = "java.lang.String";
-                }
-                break;
-            default:
-                primitiveClassName = "java.lang." + StringUtils.capitalize(StringUtils.lowerCase(schema
-                        .getElementType().getName()));
-            }
-            return codeModel.ref(Class.forName(primitiveClassName));
-        } catch (ReflectiveOperationException e) {
-            throw new FastDeserializerGeneratorException("Unknown type: " + schema
-                    .getElementType().getName(), e);
-        }
+        return classFromSchema(schema.getElementType());
     }
 
     JClass classFromUnionSchema(final Schema schema) {
         if (!Schema.Type.UNION.equals(schema.getType())) {
-            throw new FastDeserializerGeneratorException("Union schema was expected, instead got:"
+            throw new FastAvroSchemaAnalyzeException("Union schema was expected, instead got:"
                     + schema.getType().getName());
         }
 
-        if (schema.getTypes().size() > 2) {
-            return codeModel.ref(Object.class);
+        if (schema.getTypes().size() == 1) {
+            return classFromSchema(schema.getTypes().get(0));
         }
 
-        Schema unionSchema = null;
         if (schema.getTypes().size() == 2) {
             if (Schema.Type.NULL.equals(schema.getTypes().get(0).getType())) {
-                unionSchema = schema.getTypes().get(1);
+                return classFromSchema(schema.getTypes().get(1));
             } else if (Schema.Type.NULL.equals(schema.getTypes().get(1).getType())) {
-                unionSchema = schema.getTypes().get(0);
+                return classFromSchema(schema.getTypes().get(0));
+            }
+        }
+
+        return codeModel.ref(Object.class);
+    }
+
+
+    JClass classFromSchema(Schema schema) {
+        return classFromSchema(schema, true, false);
+    }
+
+    JClass classFromSchema(Schema schema, boolean abstractType) {
+        return classFromSchema(schema, abstractType, false);
+    }
+
+    JClass classFromSchema(Schema schema, boolean abstractType, boolean rawType) {
+        JClass outputClass = null;
+
+        switch (schema.getType()) {
+
+        case RECORD:
+            outputClass = useGenericTypes ?
+                    codeModel.ref(GenericData.Record.class) :
+                    codeModel.ref(schema.getFullName());
+            break;
+
+        case ARRAY:
+            if (useGenericTypes) {
+                outputClass = codeModel.ref(GenericData.Array.class);
+            } else if (!abstractType) {
+                outputClass = codeModel.ref(ArrayList.class);
             } else {
-                return codeModel.ref(Object.class);
+                outputClass = codeModel.ref(List.class);
             }
-        }
-
-        if (unionSchema != null) {
-            if (Schema.Type.RECORD.equals(unionSchema.getType())) {
-                return useGenericTypes ? codeModel.ref(GenericData.Record.class)
-                        : codeModel.ref(unionSchema
-                                .getFullName());
-            } else if (Schema.Type.ARRAY.equals(unionSchema.getType())) {
-                return codeModel.ref(List.class).narrow(elementClassFromArraySchema(unionSchema));
-            } else if (Schema.Type.MAP.equals(unionSchema.getType())) {
-                return codeModel.ref(Map.class).narrow(String.class)
-                        .narrow(elementClassFromArraySchema(unionSchema));
-            } else if (Schema.Type.ENUM.equals(unionSchema.getType())) {
-                return useGenericTypes ? codeModel.ref(GenericData.EnumSymbol.class)
-                        : codeModel.ref(unionSchema
-                                .getFullName());
-            } else if (Schema.Type.FIXED.equals(unionSchema.getType())) {
-                return useGenericTypes ? codeModel.ref(GenericData.Fixed.class)
-                        : codeModel.ref(unionSchema.getFullName());
+            if (!rawType) {
+                outputClass = outputClass.narrow(elementClassFromArraySchema(schema));
             }
-
-            throw new FastDeserializerGeneratorException("Could not determine union element schema");
-        } else {
-            throw new FastDeserializerGeneratorException("Could not determine union element schema");
+            break;
+        case MAP:
+            if (!abstractType) {
+                outputClass = codeModel.ref(HashMap.class);
+            } else {
+                outputClass = codeModel.ref(Map.class);
+            }
+            if (!rawType) {
+                outputClass = outputClass.narrow(keyClassFromMapSchema(schema), elementClassFromMapSchema(schema));
+            }
+            break;
+        case UNION:
+            outputClass = classFromUnionSchema(schema);
+            break;
+        case ENUM:
+            outputClass = useGenericTypes ?
+                    codeModel.ref(GenericData.EnumSymbol.class) :
+                    codeModel.ref(schema.getFullName());
+            break;
+        case FIXED:
+            outputClass = useGenericTypes ?
+                    codeModel.ref(GenericData.Fixed.class) :
+                    codeModel.ref(schema.getFullName());
+            break;
+        case BOOLEAN:
+            outputClass = codeModel.ref(Boolean.class);
+            break;
+        case DOUBLE:
+            outputClass = codeModel.ref(Double.class);
+            break;
+        case FLOAT:
+            outputClass = codeModel.ref(Float.class);
+            break;
+        case INT:
+            outputClass = codeModel.ref(Integer.class);
+            break;
+        case LONG:
+            outputClass = codeModel.ref(Long.class);
+            break;
+        case STRING:
+            if (schema.getProp("java-class") != null) {
+                outputClass = codeModel.ref(schema.getProp("java-class"));
+            } else {
+                outputClass = codeModel.ref(String.class);
+            }
+            break;
+        case BYTES:
+            outputClass = codeModel.ref(ByteBuffer.class);
+            break;
+        case NULL:
+            return null;
         }
+
+        return outputClass;
     }
 
-    boolean isConatinerType(Schema schema) {
-        if (Schema.Type.RECORD.equals(schema.getType())) {
-            return true;
-        } else if (Schema.Type.ARRAY.equals(schema.getType())) {
-            return true;
-        } else if (Schema.Type.MAP.equals(schema.getType())) {
-            return true;
-        } else {
-            return true;
-        }
-    }
-
-    boolean isPrimitiveType(Schema schema) {
-        if (Schema.Type.RECORD.equals(schema.getType())) {
-            return false;
-        } else if (Schema.Type.ARRAY.equals(schema.getType())) {
-            return false;
-        } else if (Schema.Type.MAP.equals(schema.getType())) {
-            return false;
-        } else if (Schema.Type.ENUM.equals(schema.getType())) {
-            return false;
-        } else if (Schema.Type.FIXED.equals(schema.getType())) {
-            return false;
-        } else {
-            return true;
-        }
-    }
-
-    boolean isPrimitiveTypeUnion(final Schema schema) {
+    public static boolean isPrimitiveTypeUnion(Schema schema) {
         if (!Schema.Type.UNION.equals(schema.getType())) {
             return false;
         }
@@ -232,71 +172,38 @@ class SchemaAnalyzer {
         return true;
     }
 
-    JClass classFromSchema(Schema schema) {
-        return classFromSchema(schema, false);
-    }
-
-    JClass classFromSchema(Schema schema, boolean concreteType) {
-        JClass outputClass;
-        if (Schema.Type.RECORD.equals(schema.getType())) {
-            if (useGenericTypes) {
-                outputClass = codeModel.ref(GenericData.Record.class);
-            } else {
-                outputClass = codeModel.ref(schema.getFullName());
-            }
-        } else if (Schema.Type.ARRAY.equals(schema.getType())) {
-            if (useGenericTypes) {
-                outputClass = codeModel.ref(GenericData.Array.class)
-                        .narrow(elementClassFromArraySchema(schema));
-            } else {
-                Class<? extends List> listClass;
-                if (concreteType) {
-                    listClass = ArrayList.class;
-                } else {
-                    listClass = List.class;
-                }
-                outputClass = codeModel.ref(listClass)
-                        .narrow(elementClassFromArraySchema(schema));
-            }
-        } else if (Schema.Type.MAP.equals(schema.getType())) {
-            Class<? extends Map> mapClass;
-            if (concreteType) {
-                mapClass = HashMap.class;
-            } else {
-                mapClass = Map.class;
-            }
-            outputClass = codeModel.ref(mapClass)
-                    .narrow(keyClassFromMapSchema(schema),
-                            elementClassFromMapSchema(schema));
-        } else if (Schema.Type.NULL.equals(schema.getType())) {
-            return null;
-        } else {
-            try {
-                String primitiveClassName;
-                switch (schema.getName()) {
-                case "int":
-                    primitiveClassName = "java.lang.Integer";
-                    break;
-                case "bytes":
-                    primitiveClassName = "java.nio.ByteBuffer";
-                    break;
-                case "string":
-                    if (schema.getProp("java-class") != null) {
-                        primitiveClassName = schema.getProp("java-class");
-                    } else {
-                        primitiveClassName = "java.lang.String";
-                    }
-                    break;
-                default:
-                    primitiveClassName = "java.lang."
-                            + StringUtils.capitalize(StringUtils.lowerCase(schema.getName()));
-                }
-                outputClass = codeModel.ref(Class.forName(primitiveClassName));
-            } catch (ReflectiveOperationException e) {
-                throw new FastDeserializerGeneratorException("unknown type: " + schema.getName(), e);
-            }
+    public static boolean isPrimitiveType(Schema schema) {
+        switch (schema.getType()) {
+        case RECORD:
+        case ARRAY:
+        case MAP:
+        case ENUM:
+        case FIXED:
+            return false;
+        default:
+            return true;
         }
-        return outputClass;
     }
 
+    public static boolean isContainerType(Schema schema) {
+        switch (schema.getType()) {
+        case MAP:
+        case RECORD:
+        case ARRAY:
+            return true;
+        default:
+            return false;
+        }
+    }
+
+    public static boolean isNamedClass(Schema schema) {
+        switch (schema.getType()) {
+        case RECORD:
+        case ENUM:
+        case FIXED:
+            return true;
+        default:
+            return false;
+        }
+    }
 }
