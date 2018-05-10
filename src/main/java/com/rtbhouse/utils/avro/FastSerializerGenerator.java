@@ -174,7 +174,6 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
             processSimpleType(elementSchema, arrayVariable.invoke("get").arg(counter), forBody);
         }
         nonEmptyArrayBlock.invoke(JExpr.direct(ENCODER), "writeArrayEnd");
-
     }
 
     private void processMap(final Schema mapSchema, JVar mapVariable, JBlock body) {
@@ -281,7 +280,8 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
         JExpression enumValueCasted = JExpr.cast(enumClass, enumValueExpression);
         JExpression valueToWrite;
         if (useGenericTypes) {
-            valueToWrite = JExpr.invoke(enumValueCasted.invoke("getSchema"), "getEnumOrdinal").arg(enumValueCasted.invoke("toString"));
+            valueToWrite = JExpr.invoke(enumValueCasted.invoke("getSchema"), "getEnumOrdinal")
+                    .arg(enumValueCasted.invoke("toString"));
         } else {
             valueToWrite = enumValueCasted.invoke("ordinal");
         }
@@ -293,31 +293,37 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
         String writeFunction;
         JClass primitiveClass = schemaAnalyzer.classFromSchema(primitiveSchema);
         JExpression primitiveValueCasted = JExpr.cast(primitiveClass, primitiveValueExpression);
-        if (Schema.Type.BOOLEAN.equals(primitiveSchema.getType())) {
-            writeFunction = "writeBoolean";
-        } else if (Schema.Type.INT.equals(primitiveSchema.getType())) {
-            writeFunction = "writeInt";
-        } else if (Schema.Type.LONG.equals(primitiveSchema.getType())) {
-            writeFunction = "writeLong";
-        } else if (Schema.Type.STRING.equals(primitiveSchema.getType())) {
+        switch (primitiveSchema.getType()) {
+        case STRING:
             writeFunction = "writeString";
             if (!primitiveClass.name().equals(String.class.getName())) {
-                primitiveValueCasted = JExpr.cast(codeModel.ref(String.class),
-                        primitiveValueCasted.invoke("toString"));
+                primitiveValueCasted = JExpr.cast(codeModel.ref(String.class), primitiveValueCasted.invoke("toString"));
             }
-        } else if (Schema.Type.DOUBLE.equals(primitiveSchema.getType())) {
-            writeFunction = "writeDouble";
-        } else if (Schema.Type.FLOAT.equals(primitiveSchema.getType())) {
-            writeFunction = "writeFloat";
-        } else if (Schema.Type.BYTES.equals(primitiveSchema.getType())) {
+            break;
+        case BYTES:
             writeFunction = "writeBytes";
-        } else {
+            break;
+        case INT:
+            writeFunction = "writeInt";
+            break;
+        case LONG:
+            writeFunction = "writeLong";
+            break;
+        case FLOAT:
+            writeFunction = "writeFloat";
+            break;
+        case DOUBLE:
+            writeFunction = "writeDouble";
+            break;
+        case BOOLEAN:
+            writeFunction = "writeBoolean";
+            break;
+        default:
             throw new FastSerializerGeneratorException(
                     "Unsupported primitive schema of type: " + primitiveSchema.getType());
         }
 
-        body.invoke(JExpr.direct(ENCODER), writeFunction)
-                .arg(primitiveValueCasted);
+        body.invoke(JExpr.direct(ENCODER), writeFunction).arg(primitiveValueCasted);
     }
 
     private JVar declareContainerVariableForSchemaInBlock(final String name, final Schema schema, JBlock block) {

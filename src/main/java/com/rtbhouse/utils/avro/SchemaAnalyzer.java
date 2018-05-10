@@ -4,6 +4,7 @@ import com.sun.codemodel.JClass;
 import com.sun.codemodel.JCodeModel;
 
 import org.apache.avro.Schema;
+import org.apache.avro.SchemaBuilderException;
 import org.apache.avro.generic.GenericData;
 
 import java.nio.ByteBuffer;
@@ -149,7 +150,7 @@ class SchemaAnalyzer {
             outputClass = codeModel.ref(ByteBuffer.class);
             break;
         case NULL:
-            return null;
+            throw new SchemaBuilderException("Asking for class for NULL type!");
         }
 
         return outputClass;
