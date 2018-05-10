@@ -73,7 +73,6 @@ class SchemaAnalyzer {
         return codeModel.ref(Object.class);
     }
 
-
     JClass classFromSchema(Schema schema) {
         return classFromSchema(schema, true, false);
     }
@@ -88,18 +87,18 @@ class SchemaAnalyzer {
         switch (schema.getType()) {
 
         case RECORD:
-            outputClass = useGenericTypes ?
-                    codeModel.ref(GenericData.Record.class) :
-                    codeModel.ref(schema.getFullName());
+            outputClass = useGenericTypes ? codeModel.ref(GenericData.Record.class) : codeModel.ref(schema.getFullName());
             break;
 
         case ARRAY:
-            if (useGenericTypes) {
-                outputClass = codeModel.ref(GenericData.Array.class);
-            } else if (!abstractType) {
-                outputClass = codeModel.ref(ArrayList.class);
-            } else {
+            if (abstractType) {
                 outputClass = codeModel.ref(List.class);
+            } else {
+                if (useGenericTypes) {
+                    outputClass = codeModel.ref(GenericData.Array.class);
+                } else {
+                    outputClass = codeModel.ref(ArrayList.class);
+                }
             }
             if (!rawType) {
                 outputClass = outputClass.narrow(elementClassFromArraySchema(schema));
@@ -119,14 +118,10 @@ class SchemaAnalyzer {
             outputClass = classFromUnionSchema(schema);
             break;
         case ENUM:
-            outputClass = useGenericTypes ?
-                    codeModel.ref(GenericData.EnumSymbol.class) :
-                    codeModel.ref(schema.getFullName());
+            outputClass = useGenericTypes ? codeModel.ref(GenericData.EnumSymbol.class) : codeModel.ref(schema.getFullName());
             break;
         case FIXED:
-            outputClass = useGenericTypes ?
-                    codeModel.ref(GenericData.Fixed.class) :
-                    codeModel.ref(schema.getFullName());
+            outputClass = useGenericTypes ? codeModel.ref(GenericData.Fixed.class) : codeModel.ref(schema.getFullName());
             break;
         case BOOLEAN:
             outputClass = codeModel.ref(Boolean.class);
@@ -185,11 +180,12 @@ class SchemaAnalyzer {
         }
     }
 
-    public static boolean isContainerType(Schema schema) {
+    public static boolean isComplexType(Schema schema) {
         switch (schema.getType()) {
         case MAP:
         case RECORD:
         case ARRAY:
+        case UNION:
             return true;
         default:
             return false;

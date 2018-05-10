@@ -2,7 +2,6 @@ package com.rtbhouse.utils.avro;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,9 +27,9 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
 
     private static final String ENCODER = "encoder";
 
-    private boolean useGenericTypes;
-    private Map<String, JMethod> serializeMethodMap = new HashMap<>();
-    private SchemaAnalyzer schemaAnalyzer;
+    private final boolean useGenericTypes;
+    private final Map<String, JMethod> serializeMethodMap = new HashMap<>();
+    private final SchemaAnalyzer schemaAnalyzer;
 
     public FastSerializerGenerator(boolean useGenericTypes, Schema schema, File destination, ClassLoader classLoader,
             String compileClassPath) {
@@ -81,6 +80,39 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
         }
     }
 
+    private void processComplexType(Schema schema, JVar variable, JBlock body) {
+        switch (schema.getType()) {
+        case RECORD:
+            processRecord(schema, variable, body);
+            break;
+        case ARRAY:
+            processArray(schema, variable, body);
+            break;
+        case UNION:
+            processUnion(schema, variable, body);
+            break;
+        case MAP:
+            processMap(schema, variable, body);
+            break;
+        default:
+            throw new FastSerializerGeneratorException("Not a complex schema type: " + schema.getType());
+        }
+
+    }
+
+    private void processSimpleType(Schema schema, JExpression valueExpression, JBlock body) {
+        switch (schema.getType()) {
+        case ENUM:
+            processEnum(schema, valueExpression, body);
+            break;
+        case FIXED:
+            processFixed(schema, valueExpression, body);
+            break;
+        default:
+            processPrimitive(schema, valueExpression, body);
+        }
+    }
+
     private void processRecord(final Schema recordSchema, JVar recordVariable, final JBlock containerBody) {
         if (!doesNotContainMethod(recordSchema)) {
             containerBody.invoke(getMethod(recordSchema)).arg(recordVariable).arg(JExpr.direct(ENCODER));
@@ -93,38 +125,17 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
         recordVariable = method.listParams()[0];
 
         for (Schema.Field field : recordSchema.getFields()) {
-
             Schema fieldSchema = field.schema();
-            JVar containerVar = null;
-            if (SchemaAnalyzer.isContainerType(fieldSchema)) {
+            if (SchemaAnalyzer.isComplexType(fieldSchema)) {
                 JClass fieldClass = schemaAnalyzer.classFromSchema(fieldSchema);
-                containerVar = declareContainerVariableForSchemaInBlock(getVariableName(field.name()), fieldSchema,
+                JVar containerVar = declareContainerVariableForSchemaInBlock(getVariableName(field.name()), fieldSchema,
                         body);
                 JExpression valueExpression = JExpr.invoke(recordVariable, "get").arg(JExpr.lit(field.pos()));
                 containerVar.init(JExpr.cast(fieldClass, valueExpression));
-            }
 
-            switch (fieldSchema.getType()) {
-            case RECORD:
-                processRecord(fieldSchema, containerVar, body);
-                break;
-            case ARRAY:
-                processArray(fieldSchema, containerVar, body);
-                break;
-            case MAP:
-                processMap(fieldSchema, containerVar, body);
-                break;
-            case ENUM:
-                processEnum(recordVariable, recordSchema, field, body);
-                break;
-            case UNION:
-                processUnion(recordVariable, recordSchema, fieldSchema, field, body);
-                break;
-            case FIXED:
-                processFixed(recordVariable, recordSchema, field, body);
-                break;
-            default:
-                processPrimitive(recordVariable, recordSchema, fieldSchema, field, body);
+                processComplexType(fieldSchema, containerVar, body);
+            } else {
+                processSimpleType(fieldSchema, recordVariable.invoke("get").arg(JExpr.lit(field.pos())), body);
             }
 
         }
@@ -154,51 +165,28 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
         forBody.invoke(JExpr.direct(ENCODER), "startItem");
 
         final Schema elementSchema = arraySchema.getElementType();
-        JVar containerVar = null;
-        if (SchemaAnalyzer.isContainerType(elementSchema)) {
-            containerVar = declareContainerVariableForSchemaInBlock(getVariableName(elementSchema.getName()),
+        if (SchemaAnalyzer.isComplexType(elementSchema)) {
+            JVar containerVar = declareContainerVariableForSchemaInBlock(getVariableName(elementSchema.getName()),
                     elementSchema, forBody);
             forBody.assign(containerVar, JExpr.invoke(JExpr.cast(arrayClass, arrayVariable), "get").arg(counter));
+            processComplexType(elementSchema, containerVar, forBody);
+        } else {
+            processSimpleType(elementSchema, arrayVariable.invoke("get").arg(counter), forBody);
         }
-
-        switch (elementSchema.getType()) {
-
-        case RECORD:
-            processRecord(elementSchema, containerVar, forBody);
-            break;
-        case ENUM:
-            processEnum(arrayVariable, arraySchema, counter, forBody);
-            break;
-        case ARRAY:
-            processArray(elementSchema, containerVar, forBody);
-            break;
-        case MAP:
-            processMap(elementSchema, containerVar, forBody);
-            break;
-        case UNION:
-            processUnion(arrayVariable, arraySchema, elementSchema, counter, forBody);
-            break;
-        case FIXED:
-            processFixed(arrayVariable, arraySchema, counter, forBody);
-            break;
-        default:
-            processPrimitive(arrayVariable, arraySchema, elementSchema, counter, forBody);
-        }
-
         nonEmptyArrayBlock.invoke(JExpr.direct(ENCODER), "writeArrayEnd");
 
     }
 
-    private void processMap(final Schema mapSchema, JVar containerVariable, JBlock body) {
+    private void processMap(final Schema mapSchema, JVar mapVariable, JBlock body) {
 
-        final JClass mapType = schemaAnalyzer.classFromSchema(mapSchema);
+        final JClass mapClass = schemaAnalyzer.classFromSchema(mapSchema);
 
         JClass keyClass = schemaAnalyzer.keyClassFromMapSchema(mapSchema);
 
         body.invoke(JExpr.direct(ENCODER), "writeMapStart");
 
-        final JExpression emptyMapCondition = containerVariable.eq(JExpr._null())
-                .cor(JExpr.invoke(JExpr.cast(mapType, containerVariable), "size").eq(JExpr.lit(0)));
+        final JExpression emptyMapCondition = mapVariable.eq(JExpr._null())
+                .cor(JExpr.invoke(JExpr.cast(mapClass, mapVariable), "size").eq(JExpr.lit(0)));
         final JConditional emptyMapIf = body._if(emptyMapCondition);
         final JBlock emptyMapBlock = emptyMapIf._then();
         emptyMapBlock.invoke(JExpr.direct(ENCODER), "setItemCount").arg(JExpr.lit(0));
@@ -206,10 +194,10 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
 
         final JBlock nonEmptyMapBlock = emptyMapIf._else();
         nonEmptyMapBlock.invoke(JExpr.direct(ENCODER), "setItemCount")
-                .arg(JExpr.invoke(JExpr.cast(mapType, containerVariable), "size"));
+                .arg(JExpr.invoke(JExpr.cast(mapClass, mapVariable), "size"));
 
         final JForEach mapKeysLoop = nonEmptyMapBlock.forEach(keyClass, getVariableName("key"),
-                JExpr.invoke(JExpr.cast(mapType, containerVariable), "keySet"));
+                JExpr.invoke(JExpr.cast(mapClass, mapVariable), "keySet"));
 
         final JBlock forBody = mapKeysLoop.body();
         forBody.invoke(JExpr.direct(ENCODER), "startItem");
@@ -225,67 +213,21 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
         final Schema valueSchema = mapSchema.getValueType();
 
         forBody.invoke(JExpr.direct(ENCODER), "writeString").arg(keyStringVar);
-        if (Schema.Type.RECORD.equals(valueSchema.getType())) {
-            JVar containerVar = declareContainerVariableForSchemaInBlock(valueSchema.getName(), valueSchema,
-                    forBody);
-            forBody.assign(containerVar,
-                    JExpr.invoke(JExpr.cast(mapType, containerVariable), "get").arg(mapKeysLoop.var()));
-            processRecord(valueSchema, containerVar, forBody);
-        } else if (Schema.Type.ARRAY.equals(valueSchema.getType())) {
-            JVar containerVar = declareContainerVariableForSchemaInBlock(valueSchema.getName(), valueSchema, forBody);
-            forBody.assign(containerVar,
-                    JExpr.invoke(JExpr.cast(mapType, containerVariable), "get").arg(mapKeysLoop.var()));
-            processArray(valueSchema, containerVar, forBody);
-        } else if (Schema.Type.MAP.equals(valueSchema.getType())) {
-            JVar containerVar = declareContainerVariableForSchemaInBlock(valueSchema.getName(), valueSchema, forBody);
-            forBody.assign(containerVar,
-                    JExpr.invoke(JExpr.cast(mapType, containerVariable), "get").arg(mapKeysLoop.var()));
-            processMap(valueSchema, containerVar, forBody);
-        } else if (Schema.Type.ENUM.equals(valueSchema.getType())) {
-            processEnum(containerVariable, mapKeysLoop.var(), mapSchema, forBody);
-        } else if (Schema.Type.FIXED.equals(valueSchema.getType())) {
-            processFixed(containerVariable, mapKeysLoop.var(), mapSchema, forBody);
-        } else if (Schema.Type.UNION.equals(valueSchema.getType())) {
-            processUnion(containerVariable, mapKeysLoop.var(), mapSchema, valueSchema, forBody);
-        } else {
-            processPrimitive(containerVariable, mapKeysLoop.var(), mapSchema, valueSchema, forBody);
-        }
 
+        JVar containerVar = null;
+        if (SchemaAnalyzer.isComplexType(valueSchema)) {
+            containerVar = declareContainerVariableForSchemaInBlock(valueSchema.getName(),
+                    valueSchema, forBody);
+            forBody.assign(containerVar, JExpr.invoke(JExpr.cast(mapClass, mapVariable), "get").arg(mapKeysLoop.var()));
+
+            processComplexType(valueSchema, containerVar, forBody);
+        } else {
+            processSimpleType(valueSchema, mapVariable.invoke("get").arg(mapKeysLoop.var()), forBody);
+        }
         nonEmptyMapBlock.invoke(JExpr.direct(ENCODER), "writeMapEnd");
     }
 
-    private void processUnion(JVar containerVariable, JVar keyVariable, final Schema containerSchema,
-            final Schema unionSchema,
-            JBlock body) {
-        processUnion(containerVariable, keyVariable, containerSchema, unionSchema, null, null, body);
-    }
-
-    private void processUnion(JVar containerVariable, final Schema containerSchema, final Schema unionSchema,
-            JVar counterVariable,
-            JBlock body) {
-        processUnion(containerVariable, null, containerSchema, unionSchema, counterVariable, null, body);
-    }
-
-    private void processUnion(JVar containerVariable, final Schema containerSchema, final Schema unionSchema,
-            final Schema.Field field,
-            JBlock body) {
-        processUnion(containerVariable, null, containerSchema, unionSchema, null, field, body);
-    }
-
-    private void processUnion(JVar containerVariable, JVar keyVariable, final Schema containerSchema,
-            final Schema unionSchema, JVar counterVariable, Schema.Field field, JBlock body) {
-
-        JVar unionVariable = null;
-        if (Schema.Type.RECORD.equals(containerSchema.getType())) {
-            unionVariable = body.decl(codeModel.ref(Object.class), getVariableName(field.name()), containerVariable
-                    .invoke("get").arg(JExpr.lit(field.pos())));
-        } else if (Schema.Type.ARRAY.equals(containerSchema.getType())) {
-            unionVariable = body.decl(codeModel.ref(Object.class), getVariableName(containerSchema.getName()),
-                    containerVariable.invoke("get").arg(counterVariable));
-        } else if (Schema.Type.MAP.equals(containerSchema.getType())) {
-            unionVariable = body.decl(codeModel.ref(Object.class), getVariableName(containerSchema.getName()),
-                    containerVariable.invoke("get").arg(keyVariable));
-        }
+    private void processUnion(final Schema unionSchema, JVar unionVariable, JBlock body) {
 
         JConditional ifBlock = null;
         for (Schema schemaOption : unionSchema.getTypes()) {
@@ -315,253 +257,73 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
                     .decl(optionClass, getVariableName(schemaOption.getName()), JExpr.cast(optionClass, unionVariable));
 
             switch (schemaOption.getType()) {
-
-            case RECORD:
-                processRecord(schemaOption, optionVar, thenBlock);
-                break;
-            case ENUM:
-                processEnum(optionVar, schemaOption, thenBlock);
-                break;
-            case ARRAY:
-                processArray(schemaOption, optionVar, thenBlock);
-                break;
-            case MAP:
-                processMap(schemaOption, optionVar, thenBlock);
-                break;
-            case FIXED:
-                processFixed(optionVar, schemaOption, thenBlock);
-                break;
             case UNION:
             case NULL:
                 throw new FastSerializerGeneratorException("Incorrect union subschema processing: " + schemaOption);
             default:
-                processPrimitive(unionVariable, schemaOption, thenBlock);
+                if (SchemaAnalyzer.isComplexType(schemaOption)) {
+                    processComplexType(schemaOption, optionVar, thenBlock);
+                } else {
+                    processSimpleType(schemaOption, optionVar, thenBlock);
+                }
             }
         }
     }
 
-    private void processFixed(JVar containerVariable, JVar keyVariable, final Schema containerSchema,
-            JBlock body) {
-        processFixed(containerVariable, keyVariable, containerSchema, null, null, body);
+    private void processFixed(Schema fixedSchema, JExpression fixedValueExpression, JBlock body) {
+        JClass fixedClass = schemaAnalyzer.classFromSchema(fixedSchema);
+        body.invoke(JExpr.direct(ENCODER), "writeFixed")
+                .arg(JExpr.invoke(JExpr.cast(fixedClass, fixedValueExpression), "bytes"));
     }
 
-    private void processFixed(JVar containerVariable, final Schema containerSchema,
-            final Schema.Field readerField, JBlock body) {
-        processFixed(containerVariable, null, containerSchema, null, readerField, body);
-    }
-
-    private void processFixed(JVar containerVariable, final Schema containerSchema, JVar counterVariable,
-            JBlock body) {
-        processFixed(containerVariable, null, containerSchema, counterVariable, null, body);
-    }
-
-    private void processFixed(JVar containerVariable, final Schema containerSchema, JBlock body) {
-        processFixed(containerVariable, null, containerSchema, null, null, body);
-    }
-
-    private void processFixed(JVar containerVariable, JVar keyVariable, final Schema containerSchema,
-            JVar counterVariable, final Schema.Field field, JBlock body) {
-
-        if (Schema.Type.RECORD.equals(containerSchema.getType())) {
-            final JClass fixedClass = useGenericTypes ?
-                    codeModel.ref(GenericData.Fixed.class) :
-                    codeModel.ref(field.schema().getFullName());
-
-            body.invoke(JExpr.direct(ENCODER), "writeFixed").arg(JExpr
-                    .invoke(JExpr.cast(fixedClass, containerVariable.invoke("get").arg(JExpr.lit(field.pos()))),
-                            "bytes"));
-        } else if (Schema.Type.ARRAY.equals(containerSchema.getType())) {
-            final JClass fixedClass = useGenericTypes ?
-                    codeModel.ref(GenericData.Fixed.class) :
-                    codeModel.ref(containerSchema.getElementType().getFullName());
-
-            body.invoke(JExpr.direct(ENCODER), "writeFixed").arg(JExpr
-                    .invoke(JExpr.cast(fixedClass, containerVariable.invoke("get").arg(counterVariable)), "bytes"));
-        } else if (Schema.Type.MAP.equals(containerSchema.getType())) {
-            final JClass fixedClass = useGenericTypes ?
-                    codeModel.ref(GenericData.Fixed.class) :
-                    codeModel.ref(containerSchema.getValueType().getFullName());
-            body.invoke(JExpr.direct(ENCODER), "writeFixed").arg(JExpr
-                    .invoke(JExpr.cast(fixedClass, containerVariable.invoke("get").arg(keyVariable)), "bytes"));
-        } else if (Schema.Type.FIXED.equals(containerSchema.getType())) {
-            body.invoke(JExpr.direct(ENCODER), "writeFixed").arg(containerVariable.invoke("bytes"));
+    private void processEnum(Schema enumSchema, JExpression enumValueExpression, JBlock body) {
+        JClass enumClass = schemaAnalyzer.classFromSchema(enumSchema);
+        JExpression enumValueCasted = JExpr.cast(enumClass, enumValueExpression);
+        JExpression valueToWrite;
+        if (useGenericTypes) {
+            valueToWrite = JExpr.invoke(enumValueCasted.invoke("getSchema"), "getEnumOrdinal").arg(enumValueCasted.invoke("toString"));
+        } else {
+            valueToWrite = enumValueCasted.invoke("ordinal");
         }
+
+        body.invoke(JExpr.direct(ENCODER), "writeEnum").arg(valueToWrite);
     }
 
-    private void processEnum(JVar containerVariable, JVar keyVariable, final Schema containerSchema,
-            JBlock body) {
-        processEnum(containerVariable, keyVariable, containerSchema, null, null, body);
-    }
-
-    private void processEnum(JVar containerVariable, final Schema containerSchema,
-            final Schema.Field readerField, JBlock body) {
-        processEnum(containerVariable, null, containerSchema, null, readerField, body);
-    }
-
-    private void processEnum(JVar containerVariable, final Schema containerSchema, JVar counterVariable,
-            JBlock body) {
-        processEnum(containerVariable, null, containerSchema, counterVariable, null, body);
-    }
-
-    private void processEnum(JVar containerVariable, final Schema containerSchema, JBlock body) {
-        processEnum(containerVariable, null, containerSchema, null, null, body);
-    }
-
-    private void processEnum(JVar containerVariable, JVar keyVariable, final Schema containerSchema,
-            JVar counterVariable, final Schema.Field field, JBlock body) {
-
-        if (Schema.Type.RECORD.equals(containerSchema.getType())) {
-            final JClass enumClass = useGenericTypes ? codeModel.ref(GenericData.EnumSymbol.class)
-                    : codeModel.ref(field.schema().getFullName());
-
-            if (useGenericTypes) {
-                body.invoke(JExpr.direct(ENCODER), "writeEnum").arg(
-                        JExpr.invoke(JExpr.invoke(
-                                JExpr.cast(enumClass, containerVariable.invoke("get").arg(JExpr.lit(field.pos()))),
-                                "getSchema"), "getEnumOrdinal")
-                                .arg(JExpr.invoke(
-                                        JExpr.cast(enumClass,
-                                                containerVariable.invoke("get").arg(JExpr.lit(field.pos()))),
-                                        "toString")));
-            } else {
-                body.invoke(JExpr.direct(ENCODER), "writeEnum").arg(
-                        JExpr.invoke(
-                                JExpr.cast(enumClass, containerVariable.invoke("get").arg(JExpr.lit(field.pos()))),
-                                "ordinal"));
-            }
-        } else if (Schema.Type.ARRAY.equals(containerSchema.getType())) {
-            final JClass enumClass = useGenericTypes ? codeModel.ref(GenericData.EnumSymbol.class)
-                    : codeModel.ref(containerSchema.getElementType().getFullName());
-
-            if (useGenericTypes) {
-                body.invoke(JExpr.direct(ENCODER), "writeEnum").arg(
-                        JExpr.invoke(
-                                JExpr.invoke(
-                                        JExpr.cast(enumClass, containerVariable.invoke("get").arg(counterVariable)),
-                                        "getSchema"),
-                                "getEnumOrdinal")
-                                .arg(JExpr.invoke(
-                                        JExpr.cast(enumClass, containerVariable.invoke("get").arg(counterVariable)),
-                                        "toString")));
-            } else {
-                body.invoke(JExpr.direct(ENCODER), "writeEnum").arg(
-                        JExpr.invoke(JExpr.cast(enumClass, containerVariable.invoke("get").arg(counterVariable)),
-                                "ordinal"));
-            }
-        } else if (Schema.Type.MAP.equals(containerSchema.getType())) {
-            final JClass enumClass = useGenericTypes ? codeModel.ref(GenericData.EnumSymbol.class)
-                    : codeModel.ref(containerSchema.getValueType().getFullName());
-
-            if (useGenericTypes) {
-                body.invoke(JExpr.direct(ENCODER), "writeEnum").arg(
-                        JExpr.invoke(
-                                JExpr.invoke(JExpr.cast(enumClass, containerVariable.invoke("get").arg(keyVariable)),
-                                        "getSchema"),
-                                "getEnumOrdinal")
-                                .arg(JExpr.invoke(
-                                        JExpr.cast(enumClass, containerVariable.invoke("get").arg(keyVariable)),
-                                        "toString")));
-            } else {
-                body.invoke(JExpr.direct(ENCODER), "writeEnum").arg(
-                        JExpr.invoke(JExpr.cast(enumClass, containerVariable.invoke("get").arg(keyVariable)),
-                                "ordinal"));
-            }
-        } else if (Schema.Type.ENUM.equals(containerSchema.getType())) {
-            if (useGenericTypes) {
-                body.invoke(JExpr.direct(ENCODER), "writeEnum")
-                        .arg(JExpr.invoke(containerVariable.invoke("getSchema"), "getEnumOrdinal")
-                                .arg(containerVariable.invoke("toString")));
-            } else {
-                body.invoke(JExpr.direct(ENCODER), "writeEnum").arg(containerVariable.invoke("ordinal"));
-            }
-        }
-    }
-
-    private void processPrimitive(JVar containerVariable, JVar keyVariable, final Schema containerSchema,
-            final Schema primitiveSchema, JBlock body) {
-        processPrimitive(containerVariable, keyVariable, null, containerSchema, primitiveSchema, null, body);
-    }
-
-    private void processPrimitive(JVar containerVariable, final Schema containerSchema, final Schema primitiveSchema,
-            JVar counterVariable, JBlock body) {
-        processPrimitive(containerVariable, null, counterVariable, containerSchema, primitiveSchema, null, body);
-    }
-
-    private void processPrimitive(JVar containerVariable, final Schema containerSchema, final Schema primitiveSchema,
-            final Schema.Field field, JBlock body) {
-        processPrimitive(containerVariable, null, null, containerSchema, primitiveSchema, field, body);
-    }
-
-    private void processPrimitive(JVar containerVariable, final Schema primitiveSchema, JBlock body) {
-        processPrimitive(containerVariable, null, null, primitiveSchema, primitiveSchema, null, body);
-    }
-
-    private void processPrimitive(JVar containerVariable, JVar keyVariable, JVar counterVariable,
-            final Schema containerSchema, final Schema primitiveSchema, final Schema.Field field, JBlock body) {
-        String writeFunction = null;
-        Class<?> castType = null;
-        String valueJavaClassName = primitiveSchema.getProp("java-class");
+    private void processPrimitive(final Schema primitiveSchema, JExpression primitiveValueExpression, JBlock body) {
+        String writeFunction;
+        JClass primitiveClass = schemaAnalyzer.classFromSchema(primitiveSchema);
+        JExpression primitiveValueCasted = JExpr.cast(primitiveClass, primitiveValueExpression);
         if (Schema.Type.BOOLEAN.equals(primitiveSchema.getType())) {
             writeFunction = "writeBoolean";
-            castType = Boolean.class;
         } else if (Schema.Type.INT.equals(primitiveSchema.getType())) {
             writeFunction = "writeInt";
-            castType = Integer.class;
         } else if (Schema.Type.LONG.equals(primitiveSchema.getType())) {
             writeFunction = "writeLong";
-            castType = Long.class;
         } else if (Schema.Type.STRING.equals(primitiveSchema.getType())) {
             writeFunction = "writeString";
-            castType = String.class;
+            if (!primitiveClass.name().equals(String.class.getName())) {
+                primitiveValueCasted = JExpr.cast(codeModel.ref(String.class),
+                        primitiveValueCasted.invoke("toString"));
+            }
         } else if (Schema.Type.DOUBLE.equals(primitiveSchema.getType())) {
             writeFunction = "writeDouble";
-            castType = Double.class;
         } else if (Schema.Type.FLOAT.equals(primitiveSchema.getType())) {
             writeFunction = "writeFloat";
-            castType = Float.class;
         } else if (Schema.Type.BYTES.equals(primitiveSchema.getType())) {
             writeFunction = "writeBytes";
-            castType = ByteBuffer.class;
-        }
-
-        if (writeFunction == null) {
+        } else {
             throw new FastSerializerGeneratorException(
                     "Unsupported primitive schema of type: " + primitiveSchema.getType());
         }
 
-        JExpression primitiveValueExpression;
-
-        if (Schema.Type.RECORD.equals(containerSchema.getType())) {
-            primitiveValueExpression = containerVariable.invoke("get").arg(JExpr.lit(field.pos()));
-        } else if (Schema.Type.ARRAY.equals(containerSchema.getType())) {
-            primitiveValueExpression = containerVariable.invoke("get").arg(counterVariable);
-        } else if (Schema.Type.MAP.equals(containerSchema.getType())) {
-            primitiveValueExpression = containerVariable.invoke("get").arg(keyVariable);
-        } else {
-            primitiveValueExpression = containerVariable;
-        }
-
-        if (valueJavaClassName != null) {
-            primitiveValueExpression = primitiveValueExpression.invoke("toString");
-        }
-
         body.invoke(JExpr.direct(ENCODER), writeFunction)
-                .arg(JExpr.cast(codeModel.ref(castType), primitiveValueExpression));
+                .arg(primitiveValueCasted);
     }
 
     private JVar declareContainerVariableForSchemaInBlock(final String name, final Schema schema, JBlock block) {
-        if (Schema.Type.ARRAY.equals(schema.getType())) {
-            return block.decl(codeModel.ref(List.class)
-                    .narrow(schemaAnalyzer.elementClassFromArraySchema(schema)), getVariableName(name), JExpr._null());
-        } else if (Schema.Type.MAP.equals(schema.getType())) {
-            return block.decl(codeModel.ref(Map.class)
-                            .narrow(schemaAnalyzer.keyClassFromMapSchema(schema),
-                                    schemaAnalyzer.elementClassFromMapSchema(schema)),
-                    getVariableName(name), JExpr._null());
-        } else if (Schema.Type.RECORD.equals(schema.getType())) {
-            return block.decl((useGenericTypes ?
-                    codeModel.ref(GenericData.Record.class) :
-                    codeModel.ref(schema.getFullName())), getVariableName(name), JExpr._null());
+        if (SchemaAnalyzer.isComplexType(schema)) {
+            JClass containerClass = schemaAnalyzer.classFromSchema(schema, true);
+            return block.decl(containerClass, getVariableName(name), JExpr._null());
         } else {
             throw new FastDeserializerGeneratorException("Incorrect container variable: " + schema.getType().getName());
         }
