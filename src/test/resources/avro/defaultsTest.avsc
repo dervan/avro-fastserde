@@ -88,6 +88,11 @@
       "default": "testStringValue"
     },
     {
+      "name": "testStringable",
+      "type": { "type": "string", "java-class": "java.net.URL" },
+      "default": "http://www.example.com"
+    },
+    {
       "name": "testStringUnion",
       "type": [
         "null",
@@ -269,6 +274,15 @@
 	]
       },
       "default": [null]
+    },
+    {
+      "name": "stringableMap",
+      "type": {
+        "type": "map",
+        "java-key-class": "java.net.URL",
+        "values": { "type": "string", "java-class": "java.math.BigInteger" }
+      },
+      "default": {"http://www.example2.com": "123"}
     },
     {
       "name": "recordMap",

@@ -18,13 +18,10 @@ import org.apache.avro.io.BinaryEncoder;
 import org.apache.avro.io.Decoder;
 import org.apache.avro.io.DecoderFactory;
 import org.apache.avro.io.EncoderFactory;
-import org.apache.avro.specific.SpecificDatumReader;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 
-import static com.rtbhouse.utils.avro.FastSerdeTestsSupport.createUnionSchema;
-import static com.rtbhouse.utils.avro.FastSerdeTestsSupport.genericDataAsDecoder;
 import static com.rtbhouse.utils.avro.FastSerdeTestsSupport.specificDataAsDecoder;
 import static com.rtbhouse.utils.avro.FastSerdeTestsSupport.specificDataFromDecoder;
 

@@ -4,6 +4,7 @@ import static com.rtbhouse.utils.avro.FastSerdeTestsSupport.genericDataAsDecoder
 
 import java.io.File;
 import java.io.IOException;
+import java.math.BigInteger;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.ByteBuffer;
@@ -76,6 +77,7 @@ public class FastDeserializerDefaultsTest {
         Assert.assertEquals(ByteBuffer.wrap(new byte[] { 0, 1, 2, 3 }), testRecord.getTestBytes());
         Assert.assertNull(testRecord.getTestBytesUnion());
         Assert.assertEquals("testStringValue", testRecord.getTestString());
+        Assert.assertEquals(new URL("http://www.example.com"), testRecord.getTestStringable());
         Assert.assertNull(testRecord.getTestStringUnion());
         Assert.assertEquals(new DefaultsFixed(new byte[] { (byte) 0xFF }), testRecord.getTestFixed());
         Assert.assertNull(testRecord.getTestFixedUnion());
@@ -97,6 +99,10 @@ public class FastDeserializerDefaultsTest {
         Assert.assertEquals(Collections.singletonList(DefaultsSubRecord.newBuilder().setSubField("recordArrayValue")
                 .setArrayField(Collections.singletonList(DefaultsEnum.A)).build()), testRecord.getRecordArray());
         Assert.assertEquals(listWithNull, testRecord.getRecordUnionArray());
+
+        Map stringableMap = new HashMap();
+        stringableMap.put(new URL("http://www.example2.com"), new BigInteger("123"));
+        Assert.assertEquals(stringableMap, testRecord.getStringableMap());
 
         Map recordMap = new HashMap();
         recordMap.put("test", DefaultsSubRecord.newBuilder().setSubField("recordMapValue")
@@ -141,6 +147,7 @@ public class FastDeserializerDefaultsTest {
         Assert.assertEquals(ByteBuffer.wrap(new byte[] { 0, 1, 2, 3 }), testRecord.get("testBytes"));
         Assert.assertNull(testRecord.get("testBytesUnion"));
         Assert.assertEquals("testStringValue", testRecord.get("testString"));
+        Assert.assertEquals("http://www.example.com", testRecord.get("testStringable"));
         Assert.assertNull(testRecord.get("testStringUnion"));
         Assert.assertEquals(new GenericData.Fixed(DefaultsFixed.getClassSchema(), new byte[] { (byte) 0xFF }),
                 testRecord.get("testFixed"));
@@ -167,6 +174,10 @@ public class FastDeserializerDefaultsTest {
         Assert.assertEquals(Collections.singletonList(newGenericSubRecord("recordArrayValue", null, "A")),
                 testRecord.get("recordArray"));
         Assert.assertEquals(listWithNull, testRecord.get("recordUnionArray"));
+
+        Map stringableMap = new HashMap();
+        stringableMap.put("http://www.example2.com", "123");
+        Assert.assertEquals(stringableMap, testRecord.get("stringableMap"));
 
         Map recordMap = new HashMap();
         recordMap.put("test", newGenericSubRecord("recordMapValue", null, "A"));

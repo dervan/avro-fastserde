@@ -2,6 +2,9 @@ package com.rtbhouse.utils.avro;
 
 import com.sun.codemodel.JClass;
 import com.sun.codemodel.JCodeModel;
+import com.sun.codemodel.JExpr;
+import com.sun.codemodel.JExpression;
+import com.sun.codemodel.JInvocation;
 
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilderException;
@@ -13,11 +16,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-class SchemaAnalyzer {
-    private JCodeModel codeModel;
-    private boolean useGenericTypes;
+class SchemaMapper {
+    private final JCodeModel codeModel;
+    private final boolean useGenericTypes;
 
-    SchemaAnalyzer(JCodeModel codeModel, boolean useGenericTypes) {
+    SchemaMapper(JCodeModel codeModel, boolean useGenericTypes) {
         this.codeModel = codeModel;
         this.useGenericTypes = useGenericTypes;
     }
@@ -27,9 +30,8 @@ class SchemaAnalyzer {
             throw new FastAvroSchemaAnalyzeException("Map schema was expected, instead got:"
                     + schema.getType().getName());
         }
-        String keyClassName = schema.getProp("java-key-class");
-        if (keyClassName != null) {
-            return codeModel.ref(keyClassName);
+        if (haveStringableKey(schema) && !useGenericTypes) {
+            return codeModel.ref(schema.getProp("java-key-class"));
         } else {
             return codeModel.ref(String.class);
         }
@@ -140,7 +142,7 @@ class SchemaAnalyzer {
             outputClass = codeModel.ref(Long.class);
             break;
         case STRING:
-            if (schema.getProp("java-class") != null) {
+            if (isStringable(schema) && !useGenericTypes) {
                 outputClass = codeModel.ref(schema.getProp("java-class"));
             } else {
                 outputClass = codeModel.ref(String.class);
@@ -154,6 +156,39 @@ class SchemaAnalyzer {
         }
 
         return outputClass;
+    }
+
+    public JExpression getEnumValueByName(Schema enumSchema, JExpression nameExpr, JInvocation getSchemaExpr) {
+        if (useGenericTypes) {
+            return JExpr._new(codeModel.ref(GenericData.EnumSymbol.class)).arg(getSchemaExpr).arg(nameExpr);
+        } else {
+            return codeModel.ref(enumSchema.getFullName()).staticInvoke("valueOf").arg(nameExpr);
+        }
+    }
+
+    public JExpression getEnumValue(Schema enumSchema, JExpression indexExpr, JInvocation getSchemaExpr) {
+        if (useGenericTypes) {
+            return JExpr._new(codeModel.ref(GenericData.EnumSymbol.class)).arg(getSchemaExpr)
+                    .arg(getSchemaExpr.invoke("getEnumSymbols").invoke("get").arg(indexExpr));
+        } else {
+            return codeModel.ref(enumSchema.getFullName()).staticInvoke("values").component(indexExpr);
+        }
+    }
+
+    public JExpression getFixedValue(Schema schema, JExpression fixedBytesExpr, JInvocation getSchemaExpr) {
+        if (!useGenericTypes) {
+            return JExpr._new(codeModel.ref(schema.getFullName())).arg(fixedBytesExpr);
+        } else {
+            return JExpr._new(codeModel.ref(GenericData.Fixed.class)).arg(getSchemaExpr).arg(fixedBytesExpr);
+        }
+    }
+
+    public JExpression getStringableValue(Schema schema, JExpression stringExpr) {
+        if (isStringable(schema)) {
+            return JExpr._new(classFromSchema(schema)).arg(stringExpr);
+        } else {
+            return stringExpr;
+        }
     }
 
     public static boolean isPrimitiveTypeUnion(Schema schema) {
@@ -181,6 +216,7 @@ class SchemaAnalyzer {
         }
     }
 
+    /* Complex type here means type that it have to handle other types inside itself. */
     public static boolean isComplexType(Schema schema) {
         switch (schema.getType()) {
         case MAP:
@@ -202,5 +238,19 @@ class SchemaAnalyzer {
         default:
             return false;
         }
+    }
+
+    public static boolean isStringable(Schema schema) {
+        if (!Schema.Type.STRING.equals(schema.getType())) {
+            throw new SchemaBuilderException("String schema expected!");
+        }
+        return schema.getProp("java-class") != null;
+    }
+
+    public static boolean haveStringableKey(Schema schema) {
+        if (!Schema.Type.MAP.equals(schema.getType())) {
+            throw new SchemaBuilderException("String schema expected!");
+        }
+        return schema.getProp("java-key-class") != null;
     }
 }

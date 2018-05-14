@@ -29,13 +29,13 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
 
     private final boolean useGenericTypes;
     private final Map<String, JMethod> serializeMethodMap = new HashMap<>();
-    private final SchemaAnalyzer schemaAnalyzer;
+    private final SchemaMapper schemaMapper;
 
     public FastSerializerGenerator(boolean useGenericTypes, Schema schema, File destination, ClassLoader classLoader,
             String compileClassPath) {
         super(schema, destination, classLoader, compileClassPath);
         this.useGenericTypes = useGenericTypes;
-        this.schemaAnalyzer = new SchemaAnalyzer(codeModel, useGenericTypes);
+        this.schemaMapper = new SchemaMapper(codeModel,useGenericTypes);
     }
 
     @Override
@@ -49,7 +49,7 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
             final JMethod serializeMethod = serializerClass.method(JMod.PUBLIC, void.class, "serialize");
             final JVar serializeMethodParam;
 
-            JClass outputClass = schemaAnalyzer.classFromSchema(schema);
+            JClass outputClass = schemaMapper.classFromSchema(schema);
             serializerClass._implements(codeModel.ref(FastSerializer.class).narrow(outputClass));
             serializeMethodParam = serializeMethod.param(outputClass, "data");
 
@@ -126,8 +126,8 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
 
         for (Schema.Field field : recordSchema.getFields()) {
             Schema fieldSchema = field.schema();
-            if (SchemaAnalyzer.isComplexType(fieldSchema)) {
-                JClass fieldClass = schemaAnalyzer.classFromSchema(fieldSchema);
+            if (SchemaMapper.isComplexType(fieldSchema)) {
+                JClass fieldClass = schemaMapper.classFromSchema(fieldSchema);
                 JVar containerVar = declareContainerVariableForSchemaInBlock(getVariableName(field.name()), fieldSchema,
                         body);
                 JExpression valueExpression = JExpr.invoke(recordVariable, "get").arg(JExpr.lit(field.pos()));
@@ -143,7 +143,7 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
 
     private void processArray(final Schema arraySchema, JVar arrayVariable, JBlock body) {
         final JClass arrayClass = codeModel.ref(List.class)
-                .narrow(schemaAnalyzer.elementClassFromArraySchema(arraySchema));
+                .narrow(schemaMapper.elementClassFromArraySchema(arraySchema));
         body.invoke(JExpr.direct(ENCODER), "writeArrayStart");
 
         final JExpression emptyArrayCondition = arrayVariable.eq(JExpr._null())
@@ -165,7 +165,7 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
         forBody.invoke(JExpr.direct(ENCODER), "startItem");
 
         final Schema elementSchema = arraySchema.getElementType();
-        if (SchemaAnalyzer.isComplexType(elementSchema)) {
+        if (SchemaMapper.isComplexType(elementSchema)) {
             JVar containerVar = declareContainerVariableForSchemaInBlock(getVariableName(elementSchema.getName()),
                     elementSchema, forBody);
             forBody.assign(containerVar, JExpr.invoke(JExpr.cast(arrayClass, arrayVariable), "get").arg(counter));
@@ -178,9 +178,9 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
 
     private void processMap(final Schema mapSchema, JVar mapVariable, JBlock body) {
 
-        final JClass mapClass = schemaAnalyzer.classFromSchema(mapSchema);
+        final JClass mapClass = schemaMapper.classFromSchema(mapSchema);
 
-        JClass keyClass = schemaAnalyzer.keyClassFromMapSchema(mapSchema);
+        JClass keyClass = schemaMapper.keyClassFromMapSchema(mapSchema);
 
         body.invoke(JExpr.direct(ENCODER), "writeMapStart");
 
@@ -214,7 +214,7 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
         forBody.invoke(JExpr.direct(ENCODER), "writeString").arg(keyStringVar);
 
         JVar containerVar = null;
-        if (SchemaAnalyzer.isComplexType(valueSchema)) {
+        if (SchemaMapper.isComplexType(valueSchema)) {
             containerVar = declareContainerVariableForSchemaInBlock(valueSchema.getName(),
                     valueSchema, forBody);
             forBody.assign(containerVar, JExpr.invoke(JExpr.cast(mapClass, mapVariable), "get").arg(mapKeysLoop.var()));
@@ -241,10 +241,10 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
                 continue;
             }
 
-            JClass optionClass = schemaAnalyzer.classFromSchema(schemaOption);
-            JClass rawOptionClass = schemaAnalyzer.classFromSchema(schemaOption, true, true);
+            JClass optionClass = schemaMapper.classFromSchema(schemaOption);
+            JClass rawOptionClass = schemaMapper.classFromSchema(schemaOption, true, true);
             JExpression condition = unionVariable._instanceof(rawOptionClass);
-            if (useGenericTypes && SchemaAnalyzer.isNamedClass(schemaOption)) {
+            if (useGenericTypes && SchemaMapper.isNamedClass(schemaOption)) {
                 condition = condition.cand(JExpr.invoke(JExpr.lit(schemaOption.getFullName()), "equals")
                         .arg(JExpr.invoke(JExpr.cast(optionClass, unionVariable), "getSchema").invoke("getFullName")));
             }
@@ -260,7 +260,7 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
             case NULL:
                 throw new FastSerializerGeneratorException("Incorrect union subschema processing: " + schemaOption);
             default:
-                if (SchemaAnalyzer.isComplexType(schemaOption)) {
+                if (SchemaMapper.isComplexType(schemaOption)) {
                     processComplexType(schemaOption, optionVar, thenBlock);
                 } else {
                     processSimpleType(schemaOption, optionVar, thenBlock);
@@ -270,13 +270,13 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
     }
 
     private void processFixed(Schema fixedSchema, JExpression fixedValueExpression, JBlock body) {
-        JClass fixedClass = schemaAnalyzer.classFromSchema(fixedSchema);
+        JClass fixedClass = schemaMapper.classFromSchema(fixedSchema);
         body.invoke(JExpr.direct(ENCODER), "writeFixed")
                 .arg(JExpr.invoke(JExpr.cast(fixedClass, fixedValueExpression), "bytes"));
     }
 
     private void processEnum(Schema enumSchema, JExpression enumValueExpression, JBlock body) {
-        JClass enumClass = schemaAnalyzer.classFromSchema(enumSchema);
+        JClass enumClass = schemaMapper.classFromSchema(enumSchema);
         JExpression enumValueCasted = JExpr.cast(enumClass, enumValueExpression);
         JExpression valueToWrite;
         if (useGenericTypes) {
@@ -291,7 +291,7 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
 
     private void processPrimitive(final Schema primitiveSchema, JExpression primitiveValueExpression, JBlock body) {
         String writeFunction;
-        JClass primitiveClass = schemaAnalyzer.classFromSchema(primitiveSchema);
+        JClass primitiveClass = schemaMapper.classFromSchema(primitiveSchema);
         JExpression primitiveValueCasted = JExpr.cast(primitiveClass, primitiveValueExpression);
         switch (primitiveSchema.getType()) {
         case STRING:
@@ -327,8 +327,8 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
     }
 
     private JVar declareContainerVariableForSchemaInBlock(final String name, final Schema schema, JBlock block) {
-        if (SchemaAnalyzer.isComplexType(schema)) {
-            JClass containerClass = schemaAnalyzer.classFromSchema(schema, true);
+        if (SchemaMapper.isComplexType(schema)) {
+            JClass containerClass = schemaMapper.classFromSchema(schema, true);
             return block.decl(containerClass, getVariableName(name), JExpr._null());
         } else {
             throw new FastDeserializerGeneratorException("Incorrect container variable: " + schema.getType().getName());
