@@ -206,8 +206,23 @@
       "default": [["B"]]
     },
     {
-      "name": "oldInt",
-      "type": "int"
+      "name": "oldSubRecord",
+      "type": {
+          "type": "record",
+          "name": "OldSubRecord",
+          "doc": null,
+          "fields": [
+            {
+              "name": "oldSubField",
+              "type": "string"
+            }
+          ]
+       }
+    },
+    {
+      "name": "newFieldWithOldSubRecord",
+      "type": "OldSubRecord",
+      "default": {"oldSubField": "defaultOldSubField" }
     },
     {
       "name": "subRecordUnion",
