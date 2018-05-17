@@ -7,7 +7,6 @@ import com.sun.codemodel.JExpression;
 import com.sun.codemodel.JInvocation;
 
 import org.apache.avro.Schema;
-import org.apache.avro.SchemaBuilderException;
 import org.apache.avro.generic.GenericData;
 
 import java.nio.ByteBuffer;
@@ -26,8 +25,8 @@ class SchemaMapper {
     }
 
     JClass keyClassFromMapSchema(Schema schema) {
-        if (!schema.getType().equals(Schema.Type.MAP)) {
-            throw new FastAvroSchemaAnalyzeException("Map schema was expected, instead got:"
+        if (!Schema.Type.MAP.equals(schema.getType())) {
+            throw new SchemaMapperException("Map schema was expected, instead got:"
                     + schema.getType().getName());
         }
         if (haveStringableKey(schema) && !useGenericTypes) {
@@ -37,27 +36,27 @@ class SchemaMapper {
         }
     }
 
-    JClass elementClassFromMapSchema(Schema schema) {
-        if (!schema.getType().equals(Schema.Type.MAP)) {
-            throw new FastAvroSchemaAnalyzeException("Map schema was expected, instead got:"
+    private JClass valueClassFromMapSchema(Schema schema) {
+        if (!Schema.Type.MAP.equals(schema.getType())) {
+            throw new SchemaMapperException("Map schema was expected, instead got:"
                     + schema.getType().getName());
         }
 
         return classFromSchema(schema.getValueType());
     }
 
-    JClass elementClassFromArraySchema(Schema schema) {
+    private JClass elementClassFromArraySchema(Schema schema) {
         if (!Schema.Type.ARRAY.equals(schema.getType())) {
-            throw new FastAvroSchemaAnalyzeException("Array schema was expected, instead got:"
+            throw new SchemaMapperException("Array schema was expected, instead got:"
                     + schema.getType().getName());
         }
 
         return classFromSchema(schema.getElementType());
     }
 
-    JClass classFromUnionSchema(final Schema schema) {
+    private JClass classFromUnionSchema(final Schema schema) {
         if (!Schema.Type.UNION.equals(schema.getType())) {
-            throw new FastAvroSchemaAnalyzeException("Union schema was expected, instead got:"
+            throw new SchemaMapperException("Union schema was expected, instead got:"
                     + schema.getType().getName());
         }
 
@@ -84,13 +83,15 @@ class SchemaMapper {
         return classFromSchema(schema, abstractType, false);
     }
 
+    /* Note that settings abstractType and rawType are not passed subcalls */
     JClass classFromSchema(Schema schema, boolean abstractType, boolean rawType) {
-        JClass outputClass = null;
+        JClass outputClass;
 
         switch (schema.getType()) {
 
         case RECORD:
-            outputClass = useGenericTypes ? codeModel.ref(GenericData.Record.class) : codeModel.ref(schema.getFullName());
+            outputClass = useGenericTypes ? codeModel.ref(GenericData.Record.class)
+                    : codeModel.ref(schema.getFullName());
             break;
 
         case ARRAY:
@@ -114,17 +115,19 @@ class SchemaMapper {
                 outputClass = codeModel.ref(Map.class);
             }
             if (!rawType) {
-                outputClass = outputClass.narrow(keyClassFromMapSchema(schema), elementClassFromMapSchema(schema));
+                outputClass = outputClass.narrow(keyClassFromMapSchema(schema), valueClassFromMapSchema(schema));
             }
             break;
         case UNION:
             outputClass = classFromUnionSchema(schema);
             break;
         case ENUM:
-            outputClass = useGenericTypes ? codeModel.ref(GenericData.EnumSymbol.class) : codeModel.ref(schema.getFullName());
+            outputClass = useGenericTypes ? codeModel.ref(GenericData.EnumSymbol.class)
+                    : codeModel.ref(schema.getFullName());
             break;
         case FIXED:
-            outputClass = useGenericTypes ? codeModel.ref(GenericData.Fixed.class) : codeModel.ref(schema.getFullName());
+            outputClass = useGenericTypes ? codeModel.ref(GenericData.Fixed.class)
+                    : codeModel.ref(schema.getFullName());
             break;
         case BOOLEAN:
             outputClass = codeModel.ref(Boolean.class);
@@ -151,8 +154,8 @@ class SchemaMapper {
         case BYTES:
             outputClass = codeModel.ref(ByteBuffer.class);
             break;
-        case NULL:
-            throw new SchemaBuilderException("Asking for class for NULL type!");
+        default:
+            throw new SchemaMapperException("Incorrect request for class for " + schema.getType().getName() + " type!");
         }
 
         return outputClass;
@@ -166,7 +169,7 @@ class SchemaMapper {
         }
     }
 
-    public JExpression getEnumValue(Schema enumSchema, JExpression indexExpr, JInvocation getSchemaExpr) {
+    public JExpression getEnumValueByIndex(Schema enumSchema, JExpression indexExpr, JInvocation getSchemaExpr) {
         if (useGenericTypes) {
             return JExpr._new(codeModel.ref(GenericData.EnumSymbol.class)).arg(getSchemaExpr)
                     .arg(getSchemaExpr.invoke("getEnumSymbols").invoke("get").arg(indexExpr));
@@ -191,31 +194,6 @@ class SchemaMapper {
         }
     }
 
-    public static boolean isPrimitiveTypeUnion(Schema schema) {
-        if (!Schema.Type.UNION.equals(schema.getType())) {
-            return false;
-        }
-        for (Schema unionOptionSchema : schema.getTypes()) {
-            if (!isPrimitiveType(unionOptionSchema)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    public static boolean isPrimitiveType(Schema schema) {
-        switch (schema.getType()) {
-        case RECORD:
-        case ARRAY:
-        case MAP:
-        case ENUM:
-        case FIXED:
-            return false;
-        default:
-            return true;
-        }
-    }
-
     /* Complex type here means type that it have to handle other types inside itself. */
     public static boolean isComplexType(Schema schema) {
         switch (schema.getType()) {
@@ -229,7 +207,7 @@ class SchemaMapper {
         }
     }
 
-    public static boolean isNamedClass(Schema schema) {
+    public static boolean isNamedType(Schema schema) {
         switch (schema.getType()) {
         case RECORD:
         case ENUM:
@@ -242,14 +220,14 @@ class SchemaMapper {
 
     public static boolean isStringable(Schema schema) {
         if (!Schema.Type.STRING.equals(schema.getType())) {
-            throw new SchemaBuilderException("String schema expected!");
+            throw new SchemaMapperException("String schema expected!");
         }
         return schema.getProp("java-class") != null;
     }
 
     public static boolean haveStringableKey(Schema schema) {
         if (!Schema.Type.MAP.equals(schema.getType())) {
-            throw new SchemaBuilderException("String schema expected!");
+            throw new SchemaMapperException("String schema expected!");
         }
         return schema.getProp("java-key-class") != null;
     }

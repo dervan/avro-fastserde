@@ -124,22 +124,6 @@ public class FastSpecificDeserializerGeneratorTest {
     }
 
     @Test
-    public void shouldReadEnumArray() {
-        // given
-        TestRecord record = emptyTestRecord();
-
-        record.put("testEnumArray", Arrays.asList(TestEnum.A));
-        record.put("testEnumUnionArray", Arrays.asList(TestEnum.A));
-
-        // when
-        record = decodeRecord(TestRecord.getClassSchema(), TestRecord.getClassSchema(), specificDataAsDecoder(record));
-
-        // then
-        Assert.assertEquals(TestEnum.A, record.getTestEnumArray().get(0));
-        Assert.assertEquals(TestEnum.A, record.getTestEnumUnionArray().get(0));
-    }
-
-    @Test
     public void shouldReadPermutatedEnum() throws IOException {
         // given
         Schema.Parser parser = new Schema.Parser();

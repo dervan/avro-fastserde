@@ -3,7 +3,6 @@ package com.rtbhouse.utils.avro;
 import java.io.File;
 import java.io.IOException;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 import org.apache.avro.Schema;
@@ -35,7 +34,7 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
             String compileClassPath) {
         super(schema, destination, classLoader, compileClassPath);
         this.useGenericTypes = useGenericTypes;
-        this.schemaMapper = new SchemaMapper(codeModel,useGenericTypes);
+        this.schemaMapper = new SchemaMapper(codeModel, useGenericTypes);
     }
 
     @Override
@@ -113,41 +112,39 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
         }
     }
 
-    private void processRecord(final Schema recordSchema, JVar recordVariable, final JBlock containerBody) {
+    private void processRecord(final Schema recordSchema, JVar recordVar, final JBlock containerBody) {
         if (!doesNotContainMethod(recordSchema)) {
-            containerBody.invoke(getMethod(recordSchema)).arg(recordVariable).arg(JExpr.direct(ENCODER));
+            containerBody.invoke(getMethod(recordSchema)).arg(recordVar).arg(JExpr.direct(ENCODER));
             return;
         }
         JMethod method = createMethod(recordSchema);
-        containerBody.invoke(getMethod(recordSchema)).arg(recordVariable).arg(JExpr.direct(ENCODER));
+        containerBody.invoke(getMethod(recordSchema)).arg(recordVar).arg(JExpr.direct(ENCODER));
 
         JBlock body = method.body();
-        recordVariable = method.listParams()[0];
+        recordVar = method.listParams()[0];
 
         for (Schema.Field field : recordSchema.getFields()) {
             Schema fieldSchema = field.schema();
             if (SchemaMapper.isComplexType(fieldSchema)) {
                 JClass fieldClass = schemaMapper.classFromSchema(fieldSchema);
-                JVar containerVar = declareContainerVariableForSchemaInBlock(getVariableName(field.name()), fieldSchema,
-                        body);
-                JExpression valueExpression = JExpr.invoke(recordVariable, "get").arg(JExpr.lit(field.pos()));
+                JVar containerVar = declareContainerVariableForSchemaInBlock(field.name(), fieldSchema, body);
+                JExpression valueExpression = JExpr.invoke(recordVar, "get").arg(JExpr.lit(field.pos()));
                 containerVar.init(JExpr.cast(fieldClass, valueExpression));
 
                 processComplexType(fieldSchema, containerVar, body);
             } else {
-                processSimpleType(fieldSchema, recordVariable.invoke("get").arg(JExpr.lit(field.pos())), body);
+                processSimpleType(fieldSchema, recordVar.invoke("get").arg(JExpr.lit(field.pos())), body);
             }
 
         }
     }
 
-    private void processArray(final Schema arraySchema, JVar arrayVariable, JBlock body) {
-        final JClass arrayClass = codeModel.ref(List.class)
-                .narrow(schemaMapper.elementClassFromArraySchema(arraySchema));
+    private void processArray(final Schema arraySchema, JVar arrayVar, JBlock body) {
+        final JClass arrayClass = schemaMapper.classFromSchema(arraySchema);
         body.invoke(JExpr.direct(ENCODER), "writeArrayStart");
 
-        final JExpression emptyArrayCondition = arrayVariable.eq(JExpr._null())
-                .cor(JExpr.invoke(JExpr.cast(arrayClass, arrayVariable), "size").eq(JExpr.lit(0)));
+        final JExpression emptyArrayCondition = arrayVar.eq(JExpr._null())
+                .cor(JExpr.invoke(JExpr.cast(arrayClass, arrayVar), "size").eq(JExpr.lit(0)));
 
         final JConditional emptyArrayIf = body._if(emptyArrayCondition);
         final JBlock emptyArrayBlock = emptyArrayIf._then();
@@ -156,10 +153,10 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
 
         final JBlock nonEmptyArrayBlock = emptyArrayIf._else();
         nonEmptyArrayBlock.invoke(JExpr.direct(ENCODER), "setItemCount")
-                .arg(JExpr.invoke(JExpr.cast(arrayClass, arrayVariable), "size"));
+                .arg(JExpr.invoke(JExpr.cast(arrayClass, arrayVar), "size"));
         final JForLoop forLoop = nonEmptyArrayBlock._for();
         final JVar counter = forLoop.init(codeModel.INT, getVariableName("counter"), JExpr.lit(0));
-        forLoop.test(counter.lt(JExpr.invoke(JExpr.cast(arrayClass, arrayVariable), "size")));
+        forLoop.test(counter.lt(JExpr.invoke(JExpr.cast(arrayClass, arrayVar), "size")));
         forLoop.update(counter.incr());
         final JBlock forBody = forLoop.body();
         forBody.invoke(JExpr.direct(ENCODER), "startItem");
@@ -168,15 +165,15 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
         if (SchemaMapper.isComplexType(elementSchema)) {
             JVar containerVar = declareContainerVariableForSchemaInBlock(getVariableName(elementSchema.getName()),
                     elementSchema, forBody);
-            forBody.assign(containerVar, JExpr.invoke(JExpr.cast(arrayClass, arrayVariable), "get").arg(counter));
+            forBody.assign(containerVar, JExpr.invoke(JExpr.cast(arrayClass, arrayVar), "get").arg(counter));
             processComplexType(elementSchema, containerVar, forBody);
         } else {
-            processSimpleType(elementSchema, arrayVariable.invoke("get").arg(counter), forBody);
+            processSimpleType(elementSchema, arrayVar.invoke("get").arg(counter), forBody);
         }
         nonEmptyArrayBlock.invoke(JExpr.direct(ENCODER), "writeArrayEnd");
     }
 
-    private void processMap(final Schema mapSchema, JVar mapVariable, JBlock body) {
+    private void processMap(final Schema mapSchema, JVar mapVar, JBlock body) {
 
         final JClass mapClass = schemaMapper.classFromSchema(mapSchema);
 
@@ -184,8 +181,8 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
 
         body.invoke(JExpr.direct(ENCODER), "writeMapStart");
 
-        final JExpression emptyMapCondition = mapVariable.eq(JExpr._null())
-                .cor(JExpr.invoke(JExpr.cast(mapClass, mapVariable), "size").eq(JExpr.lit(0)));
+        final JExpression emptyMapCondition = mapVar.eq(JExpr._null())
+                .cor(JExpr.invoke(JExpr.cast(mapClass, mapVar), "size").eq(JExpr.lit(0)));
         final JConditional emptyMapIf = body._if(emptyMapCondition);
         final JBlock emptyMapBlock = emptyMapIf._then();
         emptyMapBlock.invoke(JExpr.direct(ENCODER), "setItemCount").arg(JExpr.lit(0));
@@ -193,16 +190,16 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
 
         final JBlock nonEmptyMapBlock = emptyMapIf._else();
         nonEmptyMapBlock.invoke(JExpr.direct(ENCODER), "setItemCount")
-                .arg(JExpr.invoke(JExpr.cast(mapClass, mapVariable), "size"));
+                .arg(JExpr.invoke(JExpr.cast(mapClass, mapVar), "size"));
 
         final JForEach mapKeysLoop = nonEmptyMapBlock.forEach(keyClass, getVariableName("key"),
-                JExpr.invoke(JExpr.cast(mapClass, mapVariable), "keySet"));
+                JExpr.invoke(JExpr.cast(mapClass, mapVar), "keySet"));
 
         final JBlock forBody = mapKeysLoop.body();
         forBody.invoke(JExpr.direct(ENCODER), "startItem");
 
         JVar keyStringVar;
-        if (!String.class.getName().equals(keyClass.name())) {
+        if (SchemaMapper.haveStringableKey(mapSchema)) {
             keyStringVar = forBody.decl(codeModel.ref(String.class), getVariableName("keyString"),
                     mapKeysLoop.var().invoke("toString"));
         } else {
@@ -213,26 +210,25 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
 
         forBody.invoke(JExpr.direct(ENCODER), "writeString").arg(keyStringVar);
 
-        JVar containerVar = null;
+        JVar containerVar;
         if (SchemaMapper.isComplexType(valueSchema)) {
-            containerVar = declareContainerVariableForSchemaInBlock(valueSchema.getName(),
-                    valueSchema, forBody);
-            forBody.assign(containerVar, JExpr.invoke(JExpr.cast(mapClass, mapVariable), "get").arg(mapKeysLoop.var()));
+            containerVar = declareContainerVariableForSchemaInBlock(valueSchema.getName(), valueSchema, forBody);
+            forBody.assign(containerVar, JExpr.invoke(JExpr.cast(mapClass, mapVar), "get").arg(mapKeysLoop.var()));
 
             processComplexType(valueSchema, containerVar, forBody);
         } else {
-            processSimpleType(valueSchema, mapVariable.invoke("get").arg(mapKeysLoop.var()), forBody);
+            processSimpleType(valueSchema, mapVar.invoke("get").arg(mapKeysLoop.var()), forBody);
         }
         nonEmptyMapBlock.invoke(JExpr.direct(ENCODER), "writeMapEnd");
     }
 
-    private void processUnion(final Schema unionSchema, JVar unionVariable, JBlock body) {
+    private void processUnion(final Schema unionSchema, JVar unionVar, JBlock body) {
 
         JConditional ifBlock = null;
         for (Schema schemaOption : unionSchema.getTypes()) {
             // Special handling for null
             if (Schema.Type.NULL.equals(schemaOption.getType())) {
-                JExpression condition = unionVariable.eq(JExpr._null());
+                JExpression condition = unionVar.eq(JExpr._null());
                 ifBlock = ifBlock != null ? ifBlock._elseif(condition) : body._if(condition);
                 JBlock thenBlock = ifBlock._then();
                 thenBlock.invoke(JExpr.direct(ENCODER), "writeIndex")
@@ -243,17 +239,17 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
 
             JClass optionClass = schemaMapper.classFromSchema(schemaOption);
             JClass rawOptionClass = schemaMapper.classFromSchema(schemaOption, true, true);
-            JExpression condition = unionVariable._instanceof(rawOptionClass);
-            if (useGenericTypes && SchemaMapper.isNamedClass(schemaOption)) {
+            JExpression condition = unionVar._instanceof(rawOptionClass);
+            if (useGenericTypes && SchemaMapper.isNamedType(schemaOption)) {
                 condition = condition.cand(JExpr.invoke(JExpr.lit(schemaOption.getFullName()), "equals")
-                        .arg(JExpr.invoke(JExpr.cast(optionClass, unionVariable), "getSchema").invoke("getFullName")));
+                        .arg(JExpr.invoke(JExpr.cast(optionClass, unionVar), "getSchema").invoke("getFullName")));
             }
             ifBlock = ifBlock != null ? ifBlock._elseif(condition) : body._if(condition);
             JBlock thenBlock = ifBlock._then();
             thenBlock.invoke(JExpr.direct(ENCODER), "writeIndex")
                     .arg(JExpr.lit(unionSchema.getIndexNamed(schemaOption.getFullName())));
             JVar optionVar = thenBlock
-                    .decl(optionClass, getVariableName(schemaOption.getName()), JExpr.cast(optionClass, unionVariable));
+                    .decl(optionClass, getVariableName(schemaOption.getName()), JExpr.cast(optionClass, unionVar));
 
             switch (schemaOption.getType()) {
             case UNION:
@@ -296,7 +292,7 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
         switch (primitiveSchema.getType()) {
         case STRING:
             writeFunction = "writeString";
-            if (!primitiveClass.name().equals(String.class.getName())) {
+            if (SchemaMapper.isStringable(primitiveSchema)) {
                 primitiveValueCasted = JExpr.cast(codeModel.ref(String.class), primitiveValueCasted.invoke("toString"));
             }
             break;
@@ -336,8 +332,7 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
     }
 
     private boolean doesNotContainMethod(final Schema schema) {
-        return Schema.Type.RECORD.equals(schema.getType())
-                && !serializeMethodMap.containsKey(schema.getFullName());
+        return Schema.Type.RECORD.equals(schema.getType()) && !serializeMethodMap.containsKey(schema.getFullName());
     }
 
     private JMethod getMethod(final Schema schema) {
@@ -356,9 +351,7 @@ public class FastSerializerGenerator<T> extends FastSerializerGeneratorBase<T> {
                 JMethod method = serializerClass.method(JMod.PUBLIC, codeModel.VOID,
                         "serialize" + schema.getName() + nextRandomInt());
                 method._throws(IOException.class);
-                method.param(
-                        useGenericTypes ? codeModel.ref(GenericData.Record.class) : codeModel.ref(schema.getFullName()),
-                        "data");
+                method.param(schemaMapper.classFromSchema(schema), "data");
                 method.param(Encoder.class, ENCODER);
 
                 method.annotate(SuppressWarnings.class).param("value", "unchecked");
