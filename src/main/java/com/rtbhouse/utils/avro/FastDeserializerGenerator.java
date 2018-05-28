@@ -17,6 +17,7 @@ import org.apache.avro.Schema;
 import org.apache.avro.io.Decoder;
 import org.apache.avro.io.parsing.ResolvingGrammarGenerator;
 import org.apache.avro.io.parsing.Symbol;
+import org.apache.commons.lang3.StringUtils;
 import org.codehaus.jackson.JsonNode;
 
 import com.sun.codemodel.JArray;
@@ -764,7 +765,7 @@ public class FastDeserializerGenerator<T> extends FastDeserializerGeneratorBase<
 
     private JVar declareValueVar(final String name, final Schema schema, JBlock block) {
         if (SchemaAssistant.isComplexType(schema)) {
-            return block.decl(schemaAssistant.classFromSchema(schema), getVariableName(name), JExpr._null());
+            return block.decl(schemaAssistant.classFromSchema(schema), getVariableName(StringUtils.uncapitalize(name)), JExpr._null());
         } else {
             throw new FastDeserializerGeneratorException("Only complex types allowed!");
         }
@@ -780,7 +781,7 @@ public class FastDeserializerGenerator<T> extends FastDeserializerGeneratorBase<
                 return schemaVarMap.get(schemaId);
             } else {
                 JVar schemaVar = schemaMapMethod.body().decl(codeModel.ref(Schema.class),
-                        getVariableName(variableName), getValueType);
+                        getVariableName(StringUtils.uncapitalize(variableName)), getValueType);
                 registerSchema(valueSchema, schemaId, schemaVar);
                 schemaVarMap.put(schemaId, schemaVar);
                 return schemaVar;
