@@ -213,7 +213,8 @@ public class FastDeserializerGenerator<T> extends FastDeserializerGeneratorBase<
                 readerField = recordReaderSchema.getField(field.name());
                 readerFieldSchema = readerField.schema();
                 if (useGenericTypes)
-                    fieldSchemaVar = declareSchemaVar(field.schema(), field.name(), recordSchemaVar.invoke("getField").arg(field.name()).invoke("schema"));
+                    fieldSchemaVar = declareSchemaVar(field.schema(), field.name(),
+                            recordSchemaVar.invoke("getField").arg(field.name()).invoke("schema"));
             }
 
             JExpression fieldValueExpression;
@@ -458,8 +459,7 @@ public class FastDeserializerGenerator<T> extends FastDeserializerGeneratorBase<
                     throw new FastDeserializerGeneratorException("Unable to determine action for field: " + name);
                 }
 
-                Symbol.UnionAdjustAction unionAdjustAction =
-                        (Symbol.UnionAdjustAction) alternative.symbols[i].production[0];
+                Symbol.UnionAdjustAction unionAdjustAction = (Symbol.UnionAdjustAction) alternative.symbols[i].production[0];
                 unionAction = FieldAction.fromValues(optionSchema.getType(), action.getShouldRead(),
                         unionAdjustAction.symToParse);
             } else {
@@ -517,7 +517,7 @@ public class FastDeserializerGenerator<T> extends FastDeserializerGeneratorBase<
                     throw new FastDeserializerGeneratorException(
                             "Value expression was expected, got null instead!");
                 }
-                thenBlock.assign(unionVar, JExpr.cast(unionClass, optionValue));
+                thenBlock.assign(unionVar, optionValue);
             }
         }
     }
