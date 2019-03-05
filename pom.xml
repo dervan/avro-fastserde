@@ -4,7 +4,7 @@
 
     <groupId>com.rtbhouse</groupId>
     <artifactId>avro-fastserde</artifactId>
-    <version>1.0.1-SNAPSHOT</version>
+    <version>1.0.4-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <name>avro-fastserde</name>
@@ -15,8 +15,8 @@
 
     <licenses>
         <license>
-            <name>GNU GPL v3</name>
-            <url>http://www.gnu.org/licenses/gpl-3.0.en.html</url>
+            <name>Apache License, Version 2.0</name>
+            <url>http://www.apache.org/licenses/LICENSE-2.0</url>
         </license>
     </licenses>
 
@@ -24,6 +24,12 @@
         <developer>
             <name>Piotr Jaczewski</name>
             <email>piotr.jaczewski@rtbhouse.com</email>
+            <organization>RTB HOUSE</organization>
+            <organizationUrl>http://www.rtbhouse.com</organizationUrl>
+        </developer>
+        <developer>
+            <name>Michal Jagielski</name>
+            <email>michal.jagielski@rtbhouse.com</email>
             <organization>RTB HOUSE</organization>
             <organizationUrl>http://www.rtbhouse.com</organizationUrl>
         </developer>
@@ -64,7 +70,7 @@
         <guava.version>19.0</guava.version>
         <apache.commons-lang3.version>3.4</apache.commons-lang3.version>
         <code.model.version>2.6</code.model.version>
-        <avro.version>1.7.7</avro.version>
+        <avro.version>1.8.2</avro.version>
         <benchmark.skip>true</benchmark.skip>
     </properties>
 
@@ -177,6 +183,13 @@
                     <excludes>
                         <exclude>**/generated/**/*.java</exclude>
                     </excludes>
+        			<annotationProcessorPaths>
+            			<path>
+                			<groupId>org.openjdk.jmh</groupId>
+                			<artifactId>jmh-generator-annprocess</artifactId>
+                			<version>${jmh.version}</version>
+            			</path>
+        			</annotationProcessorPaths>                    
                 </configuration>
             </plugin>
             <plugin>
@@ -281,6 +294,29 @@
                     </execution>
                 </executions>
             </plugin>
+			<plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-assembly-plugin</artifactId>
+                <configuration>
+                    <descriptors>
+                        <descriptor>src/main/assembly/benchmarks.xml</descriptor>
+                    </descriptors>
+                    <archive>
+                        <manifest>
+                            <mainClass>org.openjdk.jmh.Main</mainClass>
+                        </manifest>
+                    </archive>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>make-assembly</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>single</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>            
         </plugins>
     </build>
 </project>
